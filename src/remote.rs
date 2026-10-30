@@ -1,9 +1,10 @@
 use crate::sorter::Msg;
+use std::process::Command;
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::Sender,
@@ -12,6 +13,41 @@ use std::{
     thread,
     time::Duration,
 };
+
+/// Checks if rclone is installed, and if not, opens a terminal to install it.
+pub fn ensure_rclone_installed() -> Result<(), String> {
+    // 1. Check if rclone exists in PATH
+    if Command::new("rclone").arg("version").output().is_ok() {
+        return Ok(());
+    }
+
+    // 2. Detect available terminal emulator to run the install command
+    let install_cmd = "sudo pacman -S --needed --noconfirm rclone || sudo apt-get update && sudo apt-get install -y rclone || curl https://rclone.org/install.sh | sudo bash";
+    
+    let status = if Command::new("konsole").arg("-v").output().is_ok() {
+        Command::new("konsole")
+            .args(["-e", "bash", "-c", &format!("{install_cmd}; echo 'Press Enter to continue...'; read")])
+            .status()
+    } else if Command::new("alacritty").arg("-V").output().is_ok() {
+        Command::new("alacritty")
+            .args(["-e", "bash", "-c", &format!("{install_cmd}; echo 'Press Enter to continue...'; read")])
+            .status()
+    } else if Command::new("x-terminal-emulator").arg("-v").output().is_ok() {
+        Command::new("x-terminal-emulator")
+            .args(["-e", "bash", "-c", &format!("{install_cmd}; echo 'Press Enter to continue...'; read")])
+            .status()
+    } else {
+        // Fallback using pkexec / GUI elevation if no terminal binary matches
+        Command::new("pkexec")
+            .args(["pacman", "-S", "--noconfirm", "rclone"])
+            .status()
+    };
+
+    match status {
+        Ok(s) if s.success() || Command::new("rclone").arg("version").output().is_ok() => Ok(()),
+        _ => Err("Failed to install rclone automatically. Please install it manually.".into()),
+    }
+}
 
 #[derive(Clone)]
 pub struct Conn {
@@ -96,6 +132,11 @@ pub fn connect(conn: &Conn, tx: &Sender<Msg>, cancel: &Arc<AtomicBool>) -> Resul
     let log = |s: &str| {
         let _ = tx.send(Msg::Log(s.to_string()));
     };
+
+    if let Err(e) = ensure_rclone_installed() {
+        return Err(e);
+    }
+
     if conn.ip.trim().is_empty() {
         return Err("IP is empty".into());
     }
