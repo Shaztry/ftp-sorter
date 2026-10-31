@@ -162,7 +162,7 @@ pub fn scan(root: &Path, tx: &Sender<Msg>, cancel: &Arc<AtomicBool>) -> Result<P
         }
         let slot = plan.by_cat.entry(cat).or_insert((0, 0));
         slot.0 += 1;
-        slot.1 += size;
+        slot.1 += item.size;
         plan.moves.push(item);
     }
     let _ = tx.send(Msg::Log(format!(
